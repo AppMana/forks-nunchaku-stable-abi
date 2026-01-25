@@ -123,9 +123,9 @@ jobs:
         run: |
           call C:\Users\nunchaku\miniconda3\condabin\activate.bat activate
           IF "${{ matrix.torch }}"=="pre" (
-            call scripts\build_windows_wheel_torch_nightly.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 16
+            call scripts\build_windows_wheel_torch_nightly.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 8
           ) ELSE (
-            call scripts\build_windows_wheel.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 16
+            call scripts\build_windows_wheel.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 8
           )
       - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
