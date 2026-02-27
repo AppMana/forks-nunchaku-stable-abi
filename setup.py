@@ -107,11 +107,42 @@ if __name__ == "__main__":
     print(f"Detected SM targets: {sm_targets}", file=sys.stderr)
 
     assert len(sm_targets) > 0, "No SM targets found"
+    nvcc_threads_env = os.getenv("NUNCHAKU_NVCC_THREADS")
+    if nvcc_threads_env is None:
+        nvcc_threads = len(sm_targets)
+    else:
+        try:
+            nvcc_threads = int(nvcc_threads_env)
+        except ValueError as e:
+            raise ValueError(f"Invalid NUNCHAKU_NVCC_THREADS={nvcc_threads_env!r}; expected an integer") from e
+        if nvcc_threads <= 0:
+            raise ValueError(f"NUNCHAKU_NVCC_THREADS must be >= 1, got {nvcc_threads}")
+    nvcc_threads = min(nvcc_threads, len(sm_targets))
+    print(f"Using NVCC threads: {nvcc_threads}", file=sys.stderr)
 
-    GCC_FLAGS = ["-DENABLE_BF16=1", "-DBUILD_NUNCHAKU=1", "-DUSE_CUDA", "-fvisibility=hidden", "-g", "-std=c++20", "-UNDEBUG", "-Og",
-                 "-DPy_LIMITED_API=0x03090000", "-DTORCH_STABLE_ONLY"]
-    MSVC_FLAGS = ["/DENABLE_BF16=1", "/DBUILD_NUNCHAKU=1", "/DUSE_CUDA", "/std:c++20", "/UNDEBUG", "/Zc:__cplusplus", "/FS",
-                  "/DPy_LIMITED_API=0x03090000", "/DTORCH_STABLE_ONLY"]
+    GCC_FLAGS = [
+        "-DENABLE_BF16=1",
+        "-DBUILD_NUNCHAKU=1",
+        "-DUSE_CUDA",
+        "-fvisibility=hidden",
+        "-g",
+        "-std=c++20",
+        "-UNDEBUG",
+        "-Og",
+        "-DPy_LIMITED_API=0x03090000",
+        "-DTORCH_STABLE_ONLY",
+    ]
+    MSVC_FLAGS = [
+        "/DENABLE_BF16=1",
+        "/DBUILD_NUNCHAKU=1",
+        "/DUSE_CUDA",
+        "/std:c++20",
+        "/UNDEBUG",
+        "/Zc:__cplusplus",
+        "/FS",
+        "/DPy_LIMITED_API=0x03090000",
+        "/DTORCH_STABLE_ONLY",
+    ]
     NVCC_FLAGS = [
         "-DENABLE_BF16=1",
         "-DBUILD_NUNCHAKU=1",
@@ -132,7 +163,7 @@ if __name__ == "__main__":
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
         "-U__CUDA_NO_BFLOAT162_OPERATORS__",
         "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
-        f"--threads={len(sm_targets)}",
+        f"--threads={nvcc_threads}",
         "--expt-relaxed-constexpr",
         "--expt-extended-lambda",
         "--ptxas-options=--allow-expensive-optimizations=true",

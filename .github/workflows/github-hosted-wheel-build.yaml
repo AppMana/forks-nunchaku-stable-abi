@@ -1,14 +1,11 @@
 name: Hosted Stable ABI Wheel Build
-
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   release-meta:
     name: Compute nightly release metadata
@@ -27,7 +24,6 @@ jobs:
           release_name="Nightly ${timestamp} (${short_sha})"
           echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
           echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
-
   linux-wheels:
     name: Linux wheel (CUDA ${{ matrix.cuda }})
     runs-on: ubuntu-24.04
@@ -51,10 +47,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
       - name: Build wheel in manylinux image
         run: bash scripts/build_linux_wheel.sh 3.12 ${{ matrix.torch }} ${{ matrix.cuda }} 4
-
       - name: Verify stable ABI wheel tag
         shell: bash
         run: |
@@ -65,7 +59,6 @@ jobs:
               exit 1
             fi
           done
-
       - name: Smoke test wheel import in manylinux image
         shell: bash
         run: |
@@ -80,14 +73,12 @@ jobs:
               cd /tmp
               \$PYTHON_ROOT/bin/python -c 'import torch; import nunchaku._C; assert hasattr(torch.ops, \"nunchaku\"); print(\"Linux smoke import passed\")'
             "
-
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
           name: nunchaku-linux-cu${{ matrix.cuda_short }}
           path: dist/*.whl
           if-no-files-found: error
-
   windows-wheels:
     name: Windows wheel (CUDA ${{ matrix.cuda }})
     runs-on: windows-2022
@@ -113,50 +104,43 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install uv
         shell: pwsh
         run: python -m pip install --upgrade pip uv
-
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.29
         with:
           cuda: ${{ matrix.cuda_toolkit }}
           method: network
           log-file-suffix: windows-cu${{ matrix.cuda_short }}
-
       - name: Show nvcc version
         shell: pwsh
         run: nvcc --version
-
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-
       - name: Install build dependencies
         shell: pwsh
         run: |
           uv pip install --system build ninja setuptools wheel
           uv pip install --system --no-cache-dir torch==${{ matrix.torch }} torchvision==${{ matrix.torchvision }} torchaudio==${{ matrix.torchaudio }} --index-url https://download.pytorch.org/whl/cu${{ matrix.cuda_short }}
-
       - name: Build wheel
         shell: pwsh
         env:
           NUNCHAKU_INSTALL_MODE: ALL
           NUNCHAKU_BUILD_WHEELS: "1"
+          NUNCHAKU_NVCC_THREADS: "1"
           NVCC_PREPEND_FLAGS: -allow-unsupported-compiler
           DISTUTILS_USE_SDK: "1"
-          MAX_JOBS: "4"
+          MAX_JOBS: "1"
         run: |
           if (Test-Path build) { Remove-Item -Recurse -Force build }
           python -m build --wheel --no-isolation
-
       - name: Verify stable ABI wheel tag
         shell: pwsh
         run: |
@@ -168,7 +152,6 @@ jobs:
               throw "Expected cp39-abi3 wheel tag, got: $($wheel.Name)"
             }
           }
-
       - name: Smoke test wheel import
         shell: pwsh
         run: |
@@ -177,14 +160,12 @@ jobs:
           Push-Location $env:TEMP
           python -c "import torch; import nunchaku._C; assert hasattr(torch.ops, 'nunchaku'); print('Windows smoke import passed')"
           Pop-Location
-
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
           name: nunchaku-windows-cu${{ matrix.cuda_short }}
           path: dist/*.whl
           if-no-files-found: error
-
   publish-nightly-release:
     name: Publish nightly prerelease
     runs-on: ubuntu-24.04
@@ -198,11 +179,9 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
-
       - name: List artifacts
         shell: bash
         run: ls -la release-artifacts
-
       - name: Create or update prerelease
         uses: softprops/action-gh-release@v2
         with:
@@ -217,7 +196,6 @@ jobs:
           overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   publish-simple-index:
     name: Publish gh-pages simple index
     runs-on: ubuntu-24.04
@@ -231,7 +209,6 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
-
       - name: Prepare gh-pages branch
         shell: bash
         env:
@@ -249,7 +226,6 @@ jobs:
             git remote add origin "$REPO_URL"
             popd >/dev/null
           fi
-
       - name: Stage wheels and regenerate simple index
         shell: bash
         env:
@@ -319,7 +295,6 @@ jobs:
           } > gh-pages/index.html
 
           touch gh-pages/.nojekyll
-
       - name: Commit and push gh-pages updates
         shell: bash
         run: |
