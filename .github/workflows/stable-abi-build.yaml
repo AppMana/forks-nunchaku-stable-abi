@@ -44,7 +44,6 @@ jobs:
         id: set-tag
         run: |
           echo "tag_name=v${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
-
   # Stable ABI: only 4 wheels total (2 CUDA × 2 platforms)
   # Single Python (3.12) + single Torch (2.9) for building, but wheel works with Python 3.9+ and Torch 2.9+
   linux-wheels:
@@ -91,7 +90,6 @@ jobs:
       - name: Clean up
         if: always()
         run: bash scripts/linux_cleanup.sh
-
   windows-wheels:
     name: Build Windows stable ABI wheel (CUDA ${{ matrix.cuda }})
     runs-on: [self-hosted, win-build]
@@ -124,7 +122,6 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   # Test the built wheel under different Python and Torch versions
   test-cross-compatibility:
     name: Test cross-compatibility
