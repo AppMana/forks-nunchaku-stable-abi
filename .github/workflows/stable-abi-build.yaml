@@ -51,6 +51,7 @@ jobs:
     name: Build Linux stable ABI wheel (CUDA ${{ matrix.cuda }})
     runs-on: [self-hosted, linux-build]
     needs: release
+    if: github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
         cuda: ["12.8", "13.0"]
@@ -95,6 +96,7 @@ jobs:
     name: Build Windows stable ABI wheel (CUDA ${{ matrix.cuda }})
     runs-on: [self-hosted, win-build]
     needs: release
+    if: github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
         cuda: ["12.8", "13.0"]
@@ -128,6 +130,7 @@ jobs:
     name: Test cross-compatibility
     runs-on: [self-hosted, linux-build]
     needs: [release, linux-wheels]
+    if: github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
         python: ["3.10", "3.12", "3.13"]

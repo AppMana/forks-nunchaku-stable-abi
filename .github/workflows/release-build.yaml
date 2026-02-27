@@ -48,6 +48,7 @@ jobs:
     name: Build the linux release wheels (stable ABI)
     runs-on: [self-hosted, linux-build]
     needs: release
+    if: github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
         cuda: ["12.8", "13.0"]
@@ -90,6 +91,7 @@ jobs:
     name: Build the windows release wheels (stable ABI)
     runs-on: [self-hosted, win-build]
     needs: release
+    if: github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
         cuda: ["12.8", "13.0"]
