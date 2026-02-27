@@ -48,7 +48,9 @@ jobs:
         with:
           submodules: recursive
       - name: Build wheel in manylinux image
-        run: bash scripts/build_linux_wheel.sh 3.12 ${{ matrix.torch }} ${{ matrix.cuda }} 4
+        env:
+          NUNCHAKU_NVCC_THREADS: "1"
+        run: bash scripts/build_linux_wheel.sh 3.12 ${{ matrix.torch }} ${{ matrix.cuda }} 2
       - name: Verify stable ABI wheel tag
         shell: bash
         run: |

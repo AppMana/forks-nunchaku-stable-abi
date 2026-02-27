@@ -34,6 +34,7 @@ docker run --rm \
     ${PYTHON_ROOT_PATH}/bin/pip install build ninja wheel setuptools && \
     export NUNCHAKU_INSTALL_MODE=ALL && \
     export NUNCHAKU_BUILD_WHEELS=1 && \
+    export NUNCHAKU_NVCC_THREADS=${NUNCHAKU_NVCC_THREADS:-} && \
     export MAX_JOBS=${MAX_JOBS} && \
     ${PYTHON_ROOT_PATH}/bin/python -m build --wheel --no-isolation
     "
