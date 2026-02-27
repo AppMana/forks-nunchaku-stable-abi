@@ -31,8 +31,11 @@ jobs:
       - test
     # Only run for non-draft PRs, or for workflow_dispatch events
     if: |
-      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
-      (github.event_name == 'workflow_dispatch')
+      github.repository == 'nunchaku-ai/nunchaku' &&
+      (
+        (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+        (github.event_name == 'workflow_dispatch')
+      )
     env:
       COMFYUI_MODELS_ROOT: "/home/nunchaku/comfyui_models"
       NUNCHAKU_TEST_CACHE_ROOT: "/home/nunchaku/nunchaku_test_root"

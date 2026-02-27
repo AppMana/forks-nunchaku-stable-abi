@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -20,5 +22,38 @@ jobs:
         run: |
           python -m pip install pre-commit
           pre-commit install
+      - name: Determine changed files
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            files="$(git diff --name-only "$base_sha" "$head_sha" | tr '\n' ' ')"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            before_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+            if [[ "$before_sha" == "0000000000000000000000000000000000000000" ]]; then
+              files="$(git ls-files | tr '\n' ' ')"
+            else
+              files="$(git diff --name-only "$before_sha" "$head_sha" | tr '\n' ' ')"
+            fi
+          else
+            files="$(git ls-files | tr '\n' ' ')"
+          fi
+
+          files="$(echo "$files" | xargs)"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          if [[ -z "$files" ]]; then
+            echo "No changed files detected."
+          else
+            echo "Changed files:"
+            tr ' ' '\n' <<< "$files"
+          fi
       - name: Linting
-        run: pre-commit run --all-files
+        if: steps.changed.outputs.files != ''
+        run: pre-commit run --files ${{ steps.changed.outputs.files }}
+      - name: No files to lint
+        if: steps.changed.outputs.files == ''
+        run: echo "No changed files to lint."
