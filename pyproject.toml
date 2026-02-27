@@ -103,7 +103,8 @@ optional-dependencies.full = [
 ]
 
 [tool.setuptools.packages.find]
-include = [ "nunchaku" ]
+include = [ "nunchaku*" ]
+namespaces = true
 
 [tool.black]
 line-length = 120

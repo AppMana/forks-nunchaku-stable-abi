@@ -71,7 +71,8 @@ if __name__ == "__main__":
     cuda_version = torch.version.cuda  # e.g., "12.8"
     cuda_tag = cuda_version.replace(".", "") if cuda_version else "cpu"
     if "dev" in version:
-        version = version + date.today().strftime("%Y%m%d")
+        # Emit a PEP 440-compliant dev version (avoid setuptools normalization warnings).
+        version = version.replace("dev", ".dev") + date.today().strftime("%Y%m%d")
     # Version format: 1.2.0+cu128 (no torch version - stable ABI)
     version = f"{version}+cu{cuda_tag}"
 
@@ -198,7 +199,7 @@ if __name__ == "__main__":
     setuptools.setup(
         name="nunchaku",
         version=version,
-        packages=setuptools.find_packages(),
+        packages=setuptools.find_namespace_packages(include=["nunchaku*"]),
         ext_modules=[nunchaku_extension],
         cmdclass={"build_ext": CustomBuildExtension},
         options={"bdist_wheel": {"py_limited_api": "cp39"}},

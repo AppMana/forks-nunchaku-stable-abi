@@ -1,12 +1,12 @@
-recursive-include src *.cpp *.h *.hpp *.ipp *.cu *.cuh
+recursive-include src *.cpp *.h *.cu *.cuh
 recursive-include nunchaku *.py *.json
-recursive-include nunchaku/csrc *.cpp *.h *.hpp *.ipp *.cu *.cuh
+recursive-include nunchaku/csrc *.cpp *.h
 
-recursive-include third_party/Block-Sparse-Attention/csrc/block_sparse_attn *.cpp *.h *.hpp *.ipp *.cu *.cuh
-recursive-include third_party/cutlass/include *.cpp *.h *.hpp *.ipp *.cu *.cuh
-recursive-include third_party/json/include *.cpp *.h *.hpp *.ipp
-recursive-include third_party/mio/include *.cpp *.h *.hpp *.ipp
-recursive-include third_party/spdlog/include *.cpp *.h *.hpp *.ipp
+recursive-include third_party/Block-Sparse-Attention/csrc/block_sparse_attn *.cpp *.h *.cu *.cuh
+recursive-include third_party/cutlass/include *.h *.hpp *.inl
+recursive-include third_party/json/include *.hpp
+recursive-include third_party/mio/include *.hpp *.ipp
+recursive-include third_party/spdlog/include *.h *.rst
 
 include LICENCE.txt
 include third_party/Block-Sparse-Attention/LICENSE

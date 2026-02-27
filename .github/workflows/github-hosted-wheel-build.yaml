@@ -151,6 +151,7 @@ jobs:
           NUNCHAKU_INSTALL_MODE: ALL
           NUNCHAKU_BUILD_WHEELS: "1"
           NVCC_PREPEND_FLAGS: -allow-unsupported-compiler
+          DISTUTILS_USE_SDK: "1"
           MAX_JOBS: "4"
         run: |
           if (Test-Path build) { Remove-Item -Recurse -Force build }
