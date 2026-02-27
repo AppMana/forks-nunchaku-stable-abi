@@ -68,11 +68,12 @@ if __name__ == "__main__":
     fp = open("nunchaku/__version__.py", "r").read()
     version = eval(fp.strip().split()[-1])
 
-    cuda_version = torch.version.cuda  # e.g., "12.4"
+    cuda_version = torch.version.cuda  # e.g., "12.8"
+    cuda_tag = cuda_version.replace(".", "") if cuda_version else "cpu"
     if "dev" in version:
         version = version + date.today().strftime("%Y%m%d")
-    # Version format: 1.2.0+cu12.4 (no torch version - stable ABI)
-    version = f"{version}+cu{cuda_version}"
+    # Version format: 1.2.0+cu128 (no torch version - stable ABI)
+    version = f"{version}+cu{cuda_tag}"
 
     ROOT_DIR = os.path.dirname(__file__)
 

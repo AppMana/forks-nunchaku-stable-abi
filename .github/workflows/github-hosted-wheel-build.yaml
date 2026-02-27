@@ -1,0 +1,336 @@
+name: Hosted Stable ABI Wheel Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-meta:
+    name: Compute nightly release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+    steps:
+      - name: Compute tag and release name
+        id: meta
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          timestamp="$(date -u +%Y%m%d-%H%M%S)"
+          tag_name="nightly-${GITHUB_SHA}"
+          release_name="Nightly ${timestamp} (${short_sha})"
+          echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
+
+  linux-wheels:
+    name: Linux wheel (CUDA ${{ matrix.cuda }})
+    runs-on: ubuntu-24.04
+    needs: release-meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: "12.8"
+            cuda_short: "128"
+            torch: "2.9"
+            torchvision: "0.24"
+            torchaudio: "2.9"
+          - cuda: "13.0"
+            cuda_short: "130"
+            torch: "2.9"
+            torchvision: "0.24"
+            torchaudio: "2.9"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build wheel in manylinux image
+        run: bash scripts/build_linux_wheel.sh 3.12 ${{ matrix.torch }} ${{ matrix.cuda }} 4
+
+      - name: Verify stable ABI wheel tag
+        shell: bash
+        run: |
+          ls -la dist/*.whl
+          for whl in dist/*.whl; do
+            if [[ "$whl" != *cp39-abi3* ]]; then
+              echo "Expected cp39-abi3 wheel tag, got: $whl"
+              exit 1
+            fi
+          done
+
+      - name: Smoke test wheel import in manylinux image
+        shell: bash
+        run: |
+          docker run --rm \
+            -v "$(pwd)":/nunchaku \
+            pytorch/manylinux2_28-builder:cuda${{ matrix.cuda }} \
+            bash -lc "
+              set -ex
+              PYTHON_ROOT=/opt/python/cp312-cp312
+              \$PYTHON_ROOT/bin/pip install --no-cache-dir torch==${{ matrix.torch }} torchvision==${{ matrix.torchvision }} torchaudio==${{ matrix.torchaudio }} --index-url https://download.pytorch.org/whl/cu${{ matrix.cuda_short }}
+              \$PYTHON_ROOT/bin/pip install --no-deps /nunchaku/dist/nunchaku-*.whl
+              cd /tmp
+              \$PYTHON_ROOT/bin/python -c 'import torch; import nunchaku._C; assert hasattr(torch.ops, \"nunchaku\"); print(\"Linux smoke import passed\")'
+            "
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nunchaku-linux-cu${{ matrix.cuda_short }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  windows-wheels:
+    name: Windows wheel (CUDA ${{ matrix.cuda }})
+    runs-on: windows-2022
+    needs: release-meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: "12.8"
+            cuda_short: "128"
+            cuda_toolkit: "12.8.1"
+            torch: "2.9"
+            torchvision: "0.24"
+            torchaudio: "2.9"
+          - cuda: "13.0"
+            cuda_short: "130"
+            cuda_toolkit: "13.0.2"
+            torch: "2.9"
+            torchvision: "0.24"
+            torchaudio: "2.9"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        shell: pwsh
+        run: python -m pip install --upgrade pip uv
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: ${{ matrix.cuda_toolkit }}
+          method: network
+          log-file-suffix: windows-cu${{ matrix.cuda_short }}
+
+      - name: Show nvcc version
+        shell: pwsh
+        run: nvcc --version
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          uv pip install --system build ninja setuptools wheel
+          uv pip install --system --no-cache-dir torch==${{ matrix.torch }} torchvision==${{ matrix.torchvision }} torchaudio==${{ matrix.torchaudio }} --index-url https://download.pytorch.org/whl/cu${{ matrix.cuda_short }}
+
+      - name: Build wheel
+        shell: pwsh
+        env:
+          NUNCHAKU_INSTALL_MODE: ALL
+          NUNCHAKU_BUILD_WHEELS: "1"
+          NVCC_PREPEND_FLAGS: -allow-unsupported-compiler
+          MAX_JOBS: "4"
+        run: |
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          python -m build --wheel --no-isolation
+
+      - name: Verify stable ABI wheel tag
+        shell: pwsh
+        run: |
+          $wheels = Get-ChildItem dist\*.whl
+          if ($wheels.Count -eq 0) { throw "No wheels found in dist/" }
+          $wheels | ForEach-Object { Write-Host $_.FullName }
+          foreach ($wheel in $wheels) {
+            if ($wheel.Name -notmatch "cp39-abi3") {
+              throw "Expected cp39-abi3 wheel tag, got: $($wheel.Name)"
+            }
+          }
+
+      - name: Smoke test wheel import
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem dist\*.whl | Select-Object -First 1).FullName
+          pip install --no-deps $wheel
+          Push-Location $env:TEMP
+          python -c "import torch; import nunchaku._C; assert hasattr(torch.ops, 'nunchaku'); print('Windows smoke import passed')"
+          Pop-Location
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nunchaku-windows-cu${{ matrix.cuda_short }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish-nightly-release:
+    name: Publish nightly prerelease
+    runs-on: ubuntu-24.04
+    needs:
+      - release-meta
+      - linux-wheels
+      - windows-wheels
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la release-artifacts
+
+      - name: Create or update prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-meta.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.release-meta.outputs.release_name }}
+          prerelease: true
+          draft: false
+          files: release-artifacts/*.whl
+          fail_on_unmatched_files: true
+          make_latest: false
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-simple-index:
+    name: Publish gh-pages simple index
+    runs-on: ubuntu-24.04
+    needs:
+      - release-meta
+      - linux-wheels
+      - windows-wheels
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Prepare gh-pages branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REPO_URL" gh-pages >/dev/null 2>&1; then
+            git clone --depth 1 --branch gh-pages "$REPO_URL" gh-pages
+          else
+            mkdir -p gh-pages
+            pushd gh-pages >/dev/null
+            git init
+            git checkout -b gh-pages
+            git remote add origin "$REPO_URL"
+            popd >/dev/null
+          fi
+
+      - name: Stage wheels and regenerate simple index
+        shell: bash
+        env:
+          TAG_NAME: ${{ needs.release-meta.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p gh-pages/cu128/nunchaku/files/"${TAG_NAME}"
+          mkdir -p gh-pages/cu130/nunchaku/files/"${TAG_NAME}"
+
+          shopt -s nullglob
+          copied_cu128=0
+          copied_cu130=0
+          for whl in release-artifacts/*.whl; do
+            base="$(basename "$whl")"
+            case "$base" in
+              *+cu128-*)
+                cp -f "$whl" "gh-pages/cu128/nunchaku/files/${TAG_NAME}/$base"
+                copied_cu128=$((copied_cu128 + 1))
+                ;;
+              *+cu130-*)
+                cp -f "$whl" "gh-pages/cu130/nunchaku/files/${TAG_NAME}/$base"
+                copied_cu130=$((copied_cu130 + 1))
+                ;;
+              *)
+                echo "Skipping unrecognized wheel name: $base"
+                ;;
+            esac
+          done
+
+          if [[ "$copied_cu128" -eq 0 || "$copied_cu130" -eq 0 ]]; then
+            echo "Expected wheels for both cu128 and cu130, got cu128=${copied_cu128} cu130=${copied_cu130}"
+            exit 1
+          fi
+
+          write_pkg_index () {
+            local cu="$1"
+            local pkg_dir="gh-pages/${cu}/nunchaku"
+            local files_dir="${pkg_dir}/files"
+            mkdir -p "$pkg_dir"
+            {
+              echo '<!doctype html><html><body>'
+              find "$files_dir" -type f -name '*.whl' | sort | while read -r file; do
+                rel="${file#${pkg_dir}/}"
+                name="$(basename "$file")"
+                hash="$(sha256sum "$file" | awk '{print $1}')"
+                printf '<a href="%s#sha256=%s">%s</a><br/>\n' "$rel" "$hash" "$name"
+              done
+              echo '</body></html>'
+            } > "${pkg_dir}/index.html"
+
+            {
+              echo '<!doctype html><html><body>'
+              echo '<a href="nunchaku/">nunchaku</a>'
+              echo '</body></html>'
+            } > "gh-pages/${cu}/index.html"
+          }
+
+          write_pkg_index "cu128"
+          write_pkg_index "cu130"
+
+          {
+            echo '<!doctype html><html><body>'
+            echo '<a href="cu128/">cu128</a><br/>'
+            echo '<a href="cu130/">cu130</a>'
+            echo '</body></html>'
+          } > gh-pages/index.html
+
+          touch gh-pages/.nojekyll
+
+      - name: Commit and push gh-pages updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          pushd gh-pages >/dev/null
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No gh-pages changes to commit."
+            exit 0
+          fi
+          git commit -m "Update nightly simple index for ${GITHUB_SHA}"
+          git push origin gh-pages
+          popd >/dev/null
