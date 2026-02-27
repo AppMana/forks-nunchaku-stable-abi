@@ -5,10 +5,6 @@
 #include "Module.h"
 #include "Linear.h"
 #include "layernorm.h"
-#include <pybind11/functional.h>
-namespace pybind11 {
-class function;
-}
 
 enum class AttentionImpl {
     FlashAttention2 = 0,

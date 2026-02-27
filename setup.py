@@ -68,13 +68,11 @@ if __name__ == "__main__":
     fp = open("nunchaku/__version__.py", "r").read()
     version = eval(fp.strip().split()[-1])
 
-    torch_version = torch.__version__.split("+")[0]
-    torch_major_minor_version = ".".join(torch_version.split(".")[:2])
     cuda_version = torch.version.cuda  # e.g., "12.4"
     if "dev" in version:
         version = version + date.today().strftime("%Y%m%d")
-    # Version format: 1.2.0+cu12.4torch2.4
-    version = f"{version}+cu{cuda_version}torch{torch_major_minor_version}"
+    # Version format: 1.2.0+cu12.4 (no torch version - stable ABI)
+    version = f"{version}+cu{cuda_version}"
 
     ROOT_DIR = os.path.dirname(__file__)
 
@@ -108,14 +106,19 @@ if __name__ == "__main__":
 
     assert len(sm_targets) > 0, "No SM targets found"
 
-    GCC_FLAGS = ["-DENABLE_BF16=1", "-DBUILD_NUNCHAKU=1", "-fvisibility=hidden", "-g", "-std=c++20", "-UNDEBUG", "-Og"]
-    MSVC_FLAGS = ["/DENABLE_BF16=1", "/DBUILD_NUNCHAKU=1", "/std:c++20", "/UNDEBUG", "/Zc:__cplusplus", "/FS"]
+    GCC_FLAGS = ["-DENABLE_BF16=1", "-DBUILD_NUNCHAKU=1", "-DUSE_CUDA", "-fvisibility=hidden", "-g", "-std=c++20", "-UNDEBUG", "-Og",
+                 "-DPy_LIMITED_API=0x03090000", "-DTORCH_STABLE_ONLY"]
+    MSVC_FLAGS = ["/DENABLE_BF16=1", "/DBUILD_NUNCHAKU=1", "/DUSE_CUDA", "/std:c++20", "/UNDEBUG", "/Zc:__cplusplus", "/FS",
+                  "/DPy_LIMITED_API=0x03090000", "/DTORCH_STABLE_ONLY"]
     NVCC_FLAGS = [
         "-DENABLE_BF16=1",
         "-DBUILD_NUNCHAKU=1",
+        "-DUSE_CUDA",
         "-g",
         "-std=c++20",
         "-UNDEBUG",
+        "-DPy_LIMITED_API=0x03090000",
+        "-DTORCH_STABLE_ONLY",
         "-Xcudafe",
         "--diag_suppress=20208",  # spdlog: 'long double' is treated as 'double' in device code
         *cond("-G"),
@@ -145,6 +148,7 @@ if __name__ == "__main__":
         name="nunchaku._C",
         sources=[
             "nunchaku/csrc/pybind.cpp",
+            "nunchaku/csrc/ops.cpp",
             "src/interop/torch.cpp",
             "src/activation.cpp",
             "src/layernorm.cpp",
@@ -187,6 +191,7 @@ if __name__ == "__main__":
         ],
         extra_compile_args={"gcc": GCC_FLAGS, "msvc": MSVC_FLAGS, "nvcc": NVCC_FLAGS, "nvcc_msvc": NVCC_MSVC_FLAGS},
         include_dirs=INCLUDE_DIRS,
+        py_limited_api=True,
     )
 
     setuptools.setup(
@@ -195,4 +200,5 @@ if __name__ == "__main__":
         packages=setuptools.find_packages(),
         ext_modules=[nunchaku_extension],
         cmdclass={"build_ext": CustomBuildExtension},
+        options={"bdist_wheel": {"py_limited_api": "cp39"}},
     )

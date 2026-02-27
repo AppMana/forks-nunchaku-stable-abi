@@ -20,16 +20,12 @@ public:
             (int)in_features, (int)out_features, bias, bf16 ? Tensor::BF16 : Tensor::FP16, Device::cuda((int)deviceId));
     }
 
-    torch::Tensor forward(torch::Tensor x) {
+    torch::stable::Tensor forward(torch::stable::Tensor x) {
         checkModel();
-
-        std::cerr << "QuantizedGEMM88 forward" << std::endl;
-
-        x = x.contiguous();
 
         Tensor result = net->forward(from_torch(x));
 
-        torch::Tensor output = to_torch(result);
+        torch::stable::Tensor output = to_torch(result);
         Tensor::synchronizeDevice();
 
         return output;

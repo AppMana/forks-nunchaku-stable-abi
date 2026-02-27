@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 requires = [
   "ninja",
   "setuptools",
-  "torch>=2.7",
+  "torch>=2.9",
   "wheel",
 ]
 
 [project]
 name = "nunchaku"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",

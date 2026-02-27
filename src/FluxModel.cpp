@@ -6,8 +6,6 @@
 #include "activation.h"
 #include <nvtx3/nvToolsExt.h>
 
-#include <pybind11/functional.h>
-
 #include <iostream>
 
 using spdlog::fmt_lib::format;

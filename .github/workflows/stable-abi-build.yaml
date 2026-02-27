@@ -1,4 +1,4 @@
-name: Release Build
+name: Stable ABI Build
 on:
   workflow_dispatch:
 permissions:
@@ -44,8 +44,11 @@ jobs:
         id: set-tag
         run: |
           echo "tag_name=v${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+  # Stable ABI: only 4 wheels total (2 CUDA × 2 platforms)
+  # Single Python (3.12) + single Torch (2.9) for building, but wheel works with Python 3.9+ and Torch 2.9+
   linux-wheels:
-    name: Build the linux release wheels (stable ABI)
+    name: Build Linux stable ABI wheel (CUDA ${{ matrix.cuda }})
     runs-on: [self-hosted, linux-build]
     needs: release
     strategy:
@@ -60,8 +63,21 @@ jobs:
           submodules: true
       - name: Show current commit
         run: git log -1 --oneline
-      - name: Build wheel (stable ABI - single Python 3.12, Torch 2.9)
+      - name: Build wheel
         run: bash scripts/build_linux_wheel.sh 3.12 2.9 ${{ matrix.cuda }}
+      - name: Verify wheel tag
+        run: |
+          echo "Built wheels:"
+          ls -la dist/*.whl
+          # Verify cp39-abi3 tag
+          for whl in dist/*.whl; do
+            echo "Checking $whl"
+            if [[ "$whl" != *cp39-abi3* ]]; then
+              echo "ERROR: Wheel does not have cp39-abi3 tag!"
+              exit 1
+            fi
+          done
+          echo "All wheels have correct stable ABI tags."
       - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -71,23 +87,12 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      # - name: Upload wheels to HuggingFace Hub
-      #   env:
-      #     HF_TOKEN: ${{ secrets.HF_WHEEL_UPLOAD_TOKEN }}
-      #   run: |
-      #     pip install huggingface_hub
-      #     for whl in dist/*.whl; do
-      #       hf upload nunchaku-tech/nunchaku "$whl"
-      #     done
       - name: Clean up
         if: always()
         run: bash scripts/linux_cleanup.sh
+
   windows-wheels:
-    name: Build the windows release wheels (stable ABI)
+    name: Build Windows stable ABI wheel (CUDA ${{ matrix.cuda }})
     runs-on: [self-hosted, win-build]
     needs: release
     strategy:
@@ -103,7 +108,7 @@ jobs:
       - name: Show current commit
         shell: cmd
         run: git log -1 --oneline
-      - name: Build wheel (stable ABI - single Python 3.12, Torch 2.9)
+      - name: Build wheel
         shell: cmd
         run: |
           call C:\Users\nunchaku\miniconda3\condabin\activate.bat activate
@@ -117,13 +122,42 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    # - name: Upload wheels to HuggingFace Hub
-    #   shell: cmd
-    #   env:
-    #     HF_TOKEN: ${{ secrets.HF_WHEEL_UPLOAD_TOKEN }}
-    #   run: |
-    #     call C:\Users\nunchaku\miniconda3\condabin\activate.bat activate
-    #     pip install huggingface_hub
-    #     for %%w in (dist\*.whl) do (
-    #       hf upload nunchaku-tech/nunchaku "%%w"
-    #     )
+
+  # Test the built wheel under different Python and Torch versions
+  test-cross-compatibility:
+    name: Test cross-compatibility
+    runs-on: [self-hosted, linux-build]
+    needs: [release, linux-wheels]
+    strategy:
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+        torch: ["2.9", "2.10"]
+        cuda: ["12.8"]
+    steps:
+      - name: Install uv
+        run: pip install uv
+      - name: Set up test environment
+        run: |
+          uv venv .venv-test --python ${{ matrix.python }}
+          uv pip install --python .venv-test torch==${{ matrix.torch }} --index-url https://download.pytorch.org/whl/cu${{ matrix.cuda }}
+      - name: Download wheel from release
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*.whl"
+          path: dist/
+      - name: Install and test
+        run: |
+          source .venv-test/bin/activate
+          pip install dist/nunchaku-*-cp39-abi3-linux_x86_64.whl
+          python -c "
+          from nunchaku._C import QuantizedFluxModel, QuantizedSanaModel, QuantizedGEMM, QuantizedGEMM88
+          m = QuantizedFluxModel()
+          print('All classes instantiated OK')
+          import torch
+          print(f'torch version: {torch.__version__}')
+          print(f'torch.ops.nunchaku available: {hasattr(torch.ops, \"nunchaku\")}')
+          print('Cross-compatibility test PASSED')
+          "
+      - name: Clean up
+        if: always()
+        run: rm -rf .venv-test

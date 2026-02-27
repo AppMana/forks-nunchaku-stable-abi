@@ -70,18 +70,13 @@ jobs:
         if: steps.check.outputs.need_build == 'false'
         run: echo "Version is not a dev version or no new commits. Skipping tag."
   linux-wheels:
-    name: Build the linux nightly wheels
+    name: Build the linux nightly wheels (stable ABI)
     runs-on: [self-hosted, linux-build]
     needs: tag
     if: needs.tag.outputs.need_build == 'true' && github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13"]
-        torch: ["2.8", "2.9", "2.10", "pre"]
         cuda: ["12.8", "13.0"]
-        exclude:
-          - torch: "2.8"
-            cuda: "13.0"
     steps:
       - name: Checkout to the tag
         uses: actions/checkout@v4
@@ -91,13 +86,8 @@ jobs:
           submodules: true
       - name: Show current commit
         run: git log -1 --oneline
-      - name: Build wheels
-        run: |
-          if [[ "${{ matrix.torch }}" == "pre" ]]; then
-            bash scripts/build_linux_wheel_torch_nightly.sh ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }}
-          else
-            bash scripts/build_linux_wheel.sh ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }}
-          fi
+      - name: Build wheel (stable ABI - single Python 3.12, Torch 2.9)
+        run: bash scripts/build_linux_wheel.sh 3.12 2.9 ${{ matrix.cuda }}
       - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -111,18 +101,13 @@ jobs:
         if: always()
         run: bash scripts/linux_cleanup.sh
   windows-wheels:
-    name: Build the windows nightly wheels
+    name: Build the windows nightly wheels (stable ABI)
     runs-on: [self-hosted, win-build]
     needs: tag
     if: needs.tag.outputs.need_build == 'true' && github.repository == 'nunchaku-ai/nunchaku'
     strategy:
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13"]
-        torch: ["2.8", "2.9", "2.10", "pre"]
         cuda: ["12.8", "13.0"]
-        exclude:
-          - torch: "2.8"
-            cuda: "13.0"
     steps:
       - name: Checkout to the tag
         uses: actions/checkout@v4
@@ -133,15 +118,11 @@ jobs:
       - name: Show current commit
         shell: cmd
         run: git log -1 --oneline
-      - name: Build wheels
+      - name: Build wheel (stable ABI - single Python 3.12, Torch 2.9)
         shell: cmd
         run: |
           call C:\Users\nunchaku\miniconda3\condabin\activate.bat activate
-          IF "${{ matrix.torch }}"=="pre" (
-            call scripts\build_windows_wheel_torch_nightly.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 8
-          ) ELSE (
-            call scripts\build_windows_wheel.cmd ${{ matrix.python }} ${{ matrix.torch }} ${{ matrix.cuda }} 8
-          )
+          call scripts\build_windows_wheel.cmd 3.12 2.9 ${{ matrix.cuda }} 8
       - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:

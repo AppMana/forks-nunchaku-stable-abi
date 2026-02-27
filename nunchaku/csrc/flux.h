@@ -7,7 +7,7 @@
 #include "Linear.h"
 #include "module.h"
 
-class QuantizedFluxModel : public ModuleWrapper<FluxModel> { // : public torch::CustomClassHolder {
+class QuantizedFluxModel : public ModuleWrapper<FluxModel> {
 public:
     void init(bool use_fp4, bool offload, bool bf16, int8_t deviceId) {
         spdlog::info("Initializing QuantizedFluxModel on device {}", deviceId);
@@ -28,50 +28,68 @@ public:
         checkModel();
         return net->dtype == Tensor::BF16;
     }
-    pybind11::function residual_callback;
-    void set_residual_callback(pybind11::function callback) {
-        pybind11::gil_scoped_acquire gil;
-        if (!callback || callback.is_none()) {
-            residual_callback = pybind11::function();
+
+    // Callback storage: raw PyObject* with manual refcounting
+    PyObject *residual_callback_ = nullptr;
+    PyObject *attention_callback_ = nullptr;
+
+    void set_residual_callback(PyObject *callback) {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+
+        // Release old callback
+        Py_XDECREF(residual_callback_);
+        residual_callback_ = nullptr;
+
+        if (!callback || callback == Py_None) {
             if (net) {
                 net->set_residual_callback(nullptr);
             }
+            PyGILState_Release(gstate);
             return;
         }
-        residual_callback = std::move(callback);
+
+        Py_INCREF(callback);
+        residual_callback_ = callback;
+
         if (net) {
-            pybind11::object cb = residual_callback;
+            PyObject *cb = residual_callback_;
             net->set_residual_callback([cb](const Tensor &x) -> Tensor {
-                torch::Tensor torch_x   = to_torch(x);
-                pybind11::object result = cb(torch_x);
-                torch::Tensor torch_y   = result.cast<torch::Tensor>();
-                Tensor y                = from_torch(torch_y);
+                PyGILState_STATE gs = PyGILState_Ensure();
+                torch::stable::Tensor st_x = to_torch(x, true);
+                PyObject *py_x             = tensor_to_py(st_x);
+                PyObject *result           = PyObject_CallFunctionObjArgs(cb, py_x, NULL);
+                Py_DECREF(py_x);
+                if (!result) {
+                    PyErr_Print();
+                    PyGILState_Release(gs);
+                    throw std::runtime_error("Residual callback failed");
+                }
+                // Keep Python tensor alive during conversion
+                Py_INCREF(result);
+                torch::stable::Tensor st_y = py_to_tensor(result);
+                Tensor y                   = from_torch(st_y);
+                Py_DECREF(result);
+                PyGILState_Release(gs);
                 return y;
             });
-        } else {
         }
+
+        PyGILState_Release(gstate);
     }
 
-    torch::Tensor forward(torch::Tensor hidden_states,
-                          torch::Tensor encoder_hidden_states,
-                          torch::Tensor temb,
-                          torch::Tensor rotary_emb_img,
-                          torch::Tensor rotary_emb_context,
-                          torch::Tensor rotary_emb_single,
-                          std::optional<torch::Tensor> controlnet_block_samples        = std::nullopt,
-                          std::optional<torch::Tensor> controlnet_single_block_samples = std::nullopt,
-                          bool skip_first_layer                                        = false) {
+    torch::stable::Tensor forward(torch::stable::Tensor hidden_states,
+                                   torch::stable::Tensor encoder_hidden_states,
+                                   torch::stable::Tensor temb,
+                                   torch::stable::Tensor rotary_emb_img,
+                                   torch::stable::Tensor rotary_emb_context,
+                                   torch::stable::Tensor rotary_emb_single,
+                                   std::optional<torch::stable::Tensor> controlnet_block_samples        = std::nullopt,
+                                   std::optional<torch::stable::Tensor> controlnet_single_block_samples = std::nullopt,
+                                   bool skip_first_layer                                                = false) {
         checkModel();
         CUDADeviceContext ctx(deviceId);
 
         spdlog::debug("QuantizedFluxModel forward");
-
-        hidden_states         = hidden_states.contiguous();
-        encoder_hidden_states = encoder_hidden_states.contiguous();
-        temb                  = temb.contiguous();
-        rotary_emb_img        = rotary_emb_img.contiguous();
-        rotary_emb_context    = rotary_emb_context.contiguous();
-        rotary_emb_single     = rotary_emb_single.contiguous();
 
         Tensor result = net->forward(
             from_torch(hidden_states),
@@ -80,36 +98,29 @@ public:
             from_torch(rotary_emb_img),
             from_torch(rotary_emb_context),
             from_torch(rotary_emb_single),
-            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value().contiguous()) : Tensor{},
-            controlnet_single_block_samples.has_value()
-                ? from_torch(controlnet_single_block_samples.value().contiguous())
-                : Tensor{},
+            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value()) : Tensor{},
+            controlnet_single_block_samples.has_value() ? from_torch(controlnet_single_block_samples.value())
+                                                        : Tensor{},
             skip_first_layer);
 
-        torch::Tensor output = to_torch(result);
+        torch::stable::Tensor output = to_torch(result);
         Tensor::synchronizeDevice();
 
         return output;
     }
 
-    std::tuple<torch::Tensor, torch::Tensor>
+    std::pair<torch::stable::Tensor, torch::stable::Tensor>
     forward_layer(int64_t idx,
-                  torch::Tensor hidden_states,
-                  torch::Tensor encoder_hidden_states,
-                  torch::Tensor temb,
-                  torch::Tensor rotary_emb_img,
-                  torch::Tensor rotary_emb_context,
-                  std::optional<torch::Tensor> controlnet_block_samples        = std::nullopt,
-                  std::optional<torch::Tensor> controlnet_single_block_samples = std::nullopt) {
+                  torch::stable::Tensor hidden_states,
+                  torch::stable::Tensor encoder_hidden_states,
+                  torch::stable::Tensor temb,
+                  torch::stable::Tensor rotary_emb_img,
+                  torch::stable::Tensor rotary_emb_context,
+                  std::optional<torch::stable::Tensor> controlnet_block_samples        = std::nullopt,
+                  std::optional<torch::stable::Tensor> controlnet_single_block_samples = std::nullopt) {
         CUDADeviceContext ctx(deviceId);
 
         spdlog::debug("QuantizedFluxModel forward_layer {}", idx);
-
-        hidden_states         = hidden_states.contiguous();
-        encoder_hidden_states = encoder_hidden_states.contiguous();
-        temb                  = temb.contiguous();
-        rotary_emb_img        = rotary_emb_img.contiguous();
-        rotary_emb_context    = rotary_emb_context.contiguous();
 
         auto &&[hidden_states_, encoder_hidden_states_] = net->forward_layer(
             idx,
@@ -118,29 +129,24 @@ public:
             from_torch(temb),
             from_torch(rotary_emb_img),
             from_torch(rotary_emb_context),
-            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value().contiguous()) : Tensor{},
-            controlnet_single_block_samples.has_value()
-                ? from_torch(controlnet_single_block_samples.value().contiguous())
-                : Tensor{});
+            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value()) : Tensor{},
+            controlnet_single_block_samples.has_value() ? from_torch(controlnet_single_block_samples.value())
+                                                        : Tensor{});
 
-        hidden_states         = to_torch(hidden_states_);
-        encoder_hidden_states = to_torch(encoder_hidden_states_);
+        auto out_hs  = to_torch(hidden_states_);
+        auto out_ehs = to_torch(encoder_hidden_states_);
         Tensor::synchronizeDevice();
 
-        return {hidden_states, encoder_hidden_states};
+        return {out_hs, out_ehs};
     }
 
-    torch::Tensor forward_single_layer(int64_t idx,
-                                       torch::Tensor hidden_states,
-                                       torch::Tensor temb,
-                                       torch::Tensor rotary_emb_single) {
+    torch::stable::Tensor forward_single_layer(int64_t idx,
+                                                torch::stable::Tensor hidden_states,
+                                                torch::stable::Tensor temb,
+                                                torch::stable::Tensor rotary_emb_single) {
         CUDADeviceContext ctx(deviceId);
 
         spdlog::debug("QuantizedFluxModel forward_single_layer {}", idx);
-
-        hidden_states     = hidden_states.contiguous();
-        temb              = temb.contiguous();
-        rotary_emb_single = rotary_emb_single.contiguous();
 
         if (net->isOffloadEnabled()) {
             net->single_transformer_blocks.at(idx)->loadLazyParams();
@@ -153,16 +159,17 @@ public:
             net->single_transformer_blocks.at(idx)->releaseLazyParams();
         }
 
-        hidden_states = to_torch(result);
+        auto output = to_torch(result);
         Tensor::synchronizeDevice();
 
-        return hidden_states;
+        return output;
     }
 
-    // expose the norm1 forward method of the transformer blocks
-    // this is used by TeaCache to get the norm1 output
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
-    norm_one_forward(int64_t idx, torch::Tensor hidden_states, torch::Tensor temb) {
+    struct NormOneResult {
+        torch::stable::Tensor x, gate_msa, shift_mlp, scale_mlp, gate_mlp;
+    };
+
+    NormOneResult norm_one_forward(int64_t idx, torch::stable::Tensor hidden_states, torch::stable::Tensor temb) {
         AdaLayerNormZero::Output result =
             net->transformer_blocks.at(idx)->norm1.forward(from_torch(hidden_states), from_torch(temb));
         return {to_torch(result.x),
@@ -172,8 +179,6 @@ public:
                 to_torch(result.gate_mlp)};
     }
 
-    // must be called after loading lora
-    // skip specific ranks in W4A4 layers
     void setLoraScale(int skipRanks, float scale) {
         if (skipRanks % 16 != 0) {
             throw std::invalid_argument("skipRanks must be multiples of 16");
@@ -197,7 +202,7 @@ public:
         });
     }
 
-    void setAttentionImpl(std::string name, pybind11::function attn_func) {
+    void setAttentionImpl(std::string name, PyObject *attn_func) {
         if (name.empty() || name == "default") {
             name = "flashattn2";
         }
@@ -209,36 +214,51 @@ public:
         } else if (name == "nunchaku-fp16") {
             net->setAttentionImpl(AttentionImpl::NunchakuFP16, nullptr);
         } else if (name == "custom") {
-            pybind11::object f = attn_func;
+            // Release old callback
+            Py_XDECREF(attention_callback_);
+            Py_INCREF(attn_func);
+            attention_callback_ = attn_func;
+
+            PyObject *f = attention_callback_;
             net->setAttentionImpl(AttentionImpl::Custom, [f](Tensor qkv) -> Tensor {
-                torch::Tensor torch_qkv = to_torch(qkv, true);
-                pybind11::object result = f(torch_qkv);
-                torch::Tensor output    = result.cast<torch::Tensor>();
-                return from_torch(output);
+                PyGILState_STATE gs = PyGILState_Ensure();
+                torch::stable::Tensor st_qkv = to_torch(qkv, true);
+                PyObject *py_qkv             = tensor_to_py(st_qkv);
+                PyObject *result             = PyObject_CallFunctionObjArgs(f, py_qkv, NULL);
+                Py_DECREF(py_qkv);
+                if (!result) {
+                    PyErr_Print();
+                    PyGILState_Release(gs);
+                    throw std::runtime_error("Attention callback failed");
+                }
+                Py_INCREF(result);
+                torch::stable::Tensor st_out = py_to_tensor(result);
+                Tensor output                = from_torch(st_out);
+                Py_DECREF(result);
+                PyGILState_Release(gs);
+                return output;
             });
         } else {
             throw std::invalid_argument(spdlog::fmt_lib::format("Invalid attention implementation {}", name));
         }
     }
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+    struct ForwardLayerIPAdapterResult {
+        torch::stable::Tensor hidden_states, encoder_hidden_states, ip_query;
+    };
+
+    ForwardLayerIPAdapterResult
     forward_layer_ip_adapter(int64_t idx,
-                             torch::Tensor hidden_states,
-                             torch::Tensor encoder_hidden_states,
-                             torch::Tensor temb,
-                             torch::Tensor rotary_emb_img,
-                             torch::Tensor rotary_emb_context,
-                             std::optional<torch::Tensor> controlnet_block_samples        = std::nullopt,
-                             std::optional<torch::Tensor> controlnet_single_block_samples = std::nullopt) {
+                             torch::stable::Tensor hidden_states,
+                             torch::stable::Tensor encoder_hidden_states,
+                             torch::stable::Tensor temb,
+                             torch::stable::Tensor rotary_emb_img,
+                             torch::stable::Tensor rotary_emb_context,
+                             std::optional<torch::stable::Tensor> controlnet_block_samples        = std::nullopt,
+                             std::optional<torch::stable::Tensor> controlnet_single_block_samples = std::nullopt) {
         CUDADeviceContext ctx(deviceId);
 
         spdlog::debug("QuantizedFluxModel forward_layer {}", idx);
-
-        hidden_states         = hidden_states.contiguous();
-        encoder_hidden_states = encoder_hidden_states.contiguous();
-        temb                  = temb.contiguous();
-        rotary_emb_img        = rotary_emb_img.contiguous();
-        rotary_emb_context    = rotary_emb_context.contiguous();
 
         auto &&[hidden_states_, encoder_hidden_states_, ip_query_] = net->forward_ip_adapter(
             idx,
@@ -247,16 +267,20 @@ public:
             from_torch(temb),
             from_torch(rotary_emb_img),
             from_torch(rotary_emb_context),
-            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value().contiguous()) : Tensor{},
-            controlnet_single_block_samples.has_value()
-                ? from_torch(controlnet_single_block_samples.value().contiguous())
-                : Tensor{});
+            controlnet_block_samples.has_value() ? from_torch(controlnet_block_samples.value()) : Tensor{},
+            controlnet_single_block_samples.has_value() ? from_torch(controlnet_single_block_samples.value())
+                                                        : Tensor{});
 
-        hidden_states          = to_torch(hidden_states_);
-        encoder_hidden_states  = to_torch(encoder_hidden_states_);
-        torch::Tensor ip_query = to_torch(ip_query_);
+        auto out_hs  = to_torch(hidden_states_);
+        auto out_ehs = to_torch(encoder_hidden_states_);
+        auto out_ipq = to_torch(ip_query_);
         Tensor::synchronizeDevice();
 
-        return {hidden_states, encoder_hidden_states, ip_query};
+        return {out_hs, out_ehs, out_ipq};
+    }
+
+    ~QuantizedFluxModel() {
+        Py_XDECREF(residual_callback_);
+        Py_XDECREF(attention_callback_);
     }
 };
