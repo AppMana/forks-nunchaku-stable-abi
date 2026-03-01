@@ -205,6 +205,7 @@ jobs:
       - release-meta
       - linux-wheels
       - windows-wheels
+      - publish-nightly-release
     steps:
       - name: Download wheel artifacts
         uses: actions/download-artifact@v4
@@ -228,28 +229,51 @@ jobs:
             git remote add origin "$REPO_URL"
             popd >/dev/null
           fi
-      - name: Stage wheels and regenerate simple index
+      - name: Stage simple index metadata and regenerate simple index
         shell: bash
         env:
           TAG_NAME: ${{ needs.release-meta.outputs.tag_name }}
         run: |
           set -euo pipefail
 
-          mkdir -p gh-pages/cu128/nunchaku/files/"${TAG_NAME}"
-          mkdir -p gh-pages/cu130/nunchaku/files/"${TAG_NAME}"
+          rm -rf gh-pages/cu128/nunchaku/files gh-pages/cu130/nunchaku/files
+          mkdir -p gh-pages/cu128/nunchaku
+          mkdir -p gh-pages/cu130/nunchaku
+          touch gh-pages/cu128/nunchaku/links.tsv
+          touch gh-pages/cu130/nunchaku/links.tsv
+
+          release_base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}"
+
+          urlquote () {
+            python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"
+          }
+
+          upsert_manifest_line () {
+            local manifest="$1"
+            local name="$2"
+            local hash="$3"
+            local url="$4"
+            local tmp
+            tmp="$(mktemp)"
+            awk -F '\t' -v name="$name" '$1 != name' "$manifest" > "$tmp"
+            printf '%s\t%s\t%s\n' "$name" "$hash" "$url" >> "$tmp"
+            mv "$tmp" "$manifest"
+          }
 
           shopt -s nullglob
           copied_cu128=0
           copied_cu130=0
           for whl in release-artifacts/*.whl; do
             base="$(basename "$whl")"
+            hash="$(sha256sum "$whl" | awk '{print $1}')"
+            url="${release_base_url}/$(urlquote "$base")"
             case "$base" in
               *+cu128-*)
-                cp -f "$whl" "gh-pages/cu128/nunchaku/files/${TAG_NAME}/$base"
+                upsert_manifest_line "gh-pages/cu128/nunchaku/links.tsv" "$base" "$hash" "$url"
                 copied_cu128=$((copied_cu128 + 1))
                 ;;
               *+cu130-*)
-                cp -f "$whl" "gh-pages/cu130/nunchaku/files/${TAG_NAME}/$base"
+                upsert_manifest_line "gh-pages/cu130/nunchaku/links.tsv" "$base" "$hash" "$url"
                 copied_cu130=$((copied_cu130 + 1))
                 ;;
               *)
@@ -266,15 +290,13 @@ jobs:
           write_pkg_index () {
             local cu="$1"
             local pkg_dir="gh-pages/${cu}/nunchaku"
-            local files_dir="${pkg_dir}/files"
+            local manifest="${pkg_dir}/links.tsv"
             mkdir -p "$pkg_dir"
             {
               echo '<!doctype html><html><body>'
-              find "$files_dir" -type f -name '*.whl' | sort | while read -r file; do
-                rel="${file#${pkg_dir}/}"
-                name="$(basename "$file")"
-                hash="$(sha256sum "$file" | awk '{print $1}')"
-                printf '<a href="%s#sha256=%s">%s</a><br/>\n' "$rel" "$hash" "$name"
+              sort "$manifest" | while IFS=$'\t' read -r name hash url; do
+                [[ -n "$name" ]] || continue
+                printf '<a href="%s#sha256=%s">%s</a><br/>\n' "$url" "$hash" "$name"
               done
               echo '</body></html>'
             } > "${pkg_dir}/index.html"
