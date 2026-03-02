@@ -86,6 +86,92 @@ https://github.com/user-attachments/assets/fdd4ab68-6489-4c65-8768-259bd866e8f8
 - [Contribution Guide](https://nunchaku.tech/docs/nunchaku/developer/contribution_guide.html)
 - [Frequently Asked Questions](https://nunchaku.tech/docs/nunchaku/faq/faq.html)
 
+## Stable ABI Wheels (Torch 2.9+)
+
+This fork publishes nightly `cp39-abi3` wheels built against the PyTorch stable ABI introduced in Torch 2.9. The wheels are exposed through CUDA-specific simple indexes:
+
+- `https://appmana.github.io/forks-nunchaku-stable-abi/cu128`
+- `https://appmana.github.io/forks-nunchaku-stable-abi/cu130`
+
+Choose the CUDA lane that matches the PyTorch wheels you install.
+
+### pip
+
+Install PyTorch from the matching PyTorch index first, then install `nunchaku` from this fork's index:
+
+```bash
+# CUDA 12.8
+pip install "torch>=2.9" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install --no-deps --pre --index-url https://appmana.github.io/forks-nunchaku-stable-abi/cu128 nunchaku
+
+# CUDA 13.0
+pip install "torch>=2.9" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+pip install --no-deps --pre --index-url https://appmana.github.io/forks-nunchaku-stable-abi/cu130 nunchaku
+```
+
+`--no-deps` keeps `pip` from trying to replace your already-installed Torch packages, and `--pre` opts into the nightly wheels.
+
+### uv (one-off install)
+
+```bash
+# CUDA 12.8
+uv pip install "torch>=2.9" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv pip install --no-deps --prerelease=allow --index-url https://appmana.github.io/forks-nunchaku-stable-abi/cu128 nunchaku
+
+# CUDA 13.0
+uv pip install "torch>=2.9" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+uv pip install --no-deps --prerelease=allow --index-url https://appmana.github.io/forks-nunchaku-stable-abi/cu130 nunchaku
+```
+
+### uv project configuration (`tool.uv.sources`)
+
+For a project-managed environment, pin both PyTorch and `nunchaku` to explicit indexes. This follows uv's documented `[[tool.uv.index]]` plus `[tool.uv.sources]` pattern.
+
+```toml
+[project]
+name = "my-project"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+  "torch>=2.9",
+  "torchvision>=0.24",
+  "torchaudio>=2.9",
+  "nunchaku>=1.3.0.dev0",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128" },
+]
+torchvision = [
+  { index = "pytorch-cu128" },
+]
+torchaudio = [
+  { index = "pytorch-cu128" },
+]
+nunchaku = [
+  { index = "nunchaku-cu128" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "nunchaku-cu128"
+url = "https://appmana.github.io/forks-nunchaku-stable-abi/cu128"
+explicit = true
+```
+
+Then sync the environment:
+
+```bash
+uv sync
+```
+
+For CUDA 13.0, replace `cu128` with `cu130` in both index names and URLs.
+
 ## Contact Us
 
 For enterprises interested in adopting SVDQuant or Nunchaku, including technical consulting, sponsorship opportunities, or partnership inquiries, please contact us at muyangli@nunchaku.tech.
