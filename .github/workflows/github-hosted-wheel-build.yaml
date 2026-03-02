@@ -30,6 +30,7 @@ jobs:
     needs: release-meta
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - cuda: "12.8"
@@ -87,6 +88,7 @@ jobs:
     needs: release-meta
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - cuda: "12.8"
@@ -181,6 +183,18 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
+      - name: Validate wheel artifact count
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(release-artifacts/*.whl)
+          count="${#wheels[@]}"
+          if [[ "$count" -ne 4 ]]; then
+            echo "Expected exactly 4 wheel artifacts, found ${count}"
+            printf '%s\n' "${wheels[@]}"
+            exit 1
+          fi
       - name: List artifacts
         shell: bash
         run: ls -la release-artifacts
@@ -263,10 +277,12 @@ jobs:
           shopt -s nullglob
           copied_cu128=0
           copied_cu130=0
+          total_wheels=0
           for whl in release-artifacts/*.whl; do
             base="$(basename "$whl")"
             hash="$(sha256sum "$whl" | awk '{print $1}')"
             url="${release_base_url}/$(urlquote "$base")"
+            total_wheels=$((total_wheels + 1))
             case "$base" in
               *+cu128-*)
                 upsert_manifest_line "gh-pages/cu128/nunchaku/links.tsv" "$base" "$hash" "$url"
@@ -282,8 +298,8 @@ jobs:
             esac
           done
 
-          if [[ "$copied_cu128" -eq 0 || "$copied_cu130" -eq 0 ]]; then
-            echo "Expected wheels for both cu128 and cu130, got cu128=${copied_cu128} cu130=${copied_cu130}"
+          if [[ "$total_wheels" -ne 4 || "$copied_cu128" -ne 2 || "$copied_cu130" -ne 2 ]]; then
+            echo "Expected exactly 4 wheels (2 for cu128, 2 for cu130), got total=${total_wheels} cu128=${copied_cu128} cu130=${copied_cu130}"
             exit 1
           fi
 
